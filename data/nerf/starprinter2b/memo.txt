@@ -1,0 +1,45 @@
+
+cd /home/ubuntu/src/instant-ngp
+mkdir ./data/nerf/starprinter2b
+cd ./data/nerf/starprinter2b
+
+
+#../../../scripts/colmap2nerf.py --overwrite --video_in ./Printer_iPhone14pro.MOV --run_colmap
+gsutil cp gs://bestat_3dcapture_v0_private/job/2023/07/24/20230724-072654-470031-c09674-100-Printer_iPhone14pro/snapshots.tar.gz 20230724-072654-470031-c09674-100-Printer_iPhone14pro-snapshots.tar.gz
+tar xvzf 20230724-072654-470031-c09674-100-Printer_iPhone14pro-snapshots.tar.gz
+ln -s snapshots/20230724_075207_last/dataset/colmap/undistorted/images ./
+../../../scripts/colmap2nerf.py --overwrite --images ./images --run_colmap
+
+
+## train(remote desktop)
+cd /home/ubuntu/src/instant-ngp
+NAME=starprinter2b && DISPLAY=:20 ./.venv/bin/python3 ./scripts/run.py --scene ./data/nerf/$NAME --gui
+ - per-image latents -> ON
+ - [Start training]
+ - cropsize -> 2-4
+## -> save to base.ingp
+
+## train(cli)
+NAME=starprinter2b && DISPLAY=:20 ./.venv/bin/python3 ./scripts/run.py --scene data/nerf/$NAME --train --n_steps 100000 --save_snapshot data/nerf/$NAME/train100k.ingp
+
+
+--------------------
+(cropbox)
+NAME=starprinter2b && DISPLAY=:20 ./.venv/bin/python3 ./scripts/run.py --scene data/nerf/$NAME --load_snapshot data/nerf/$NAME/base.ingp --gui --n_steps 0
+(edit run.py)
+
+--------------------
+NAME=starprinter2b && DISPLAY=:20 ./.venv/bin/python3 ./scripts/run.py --scene data/nerf/$NAME/ --load_snapshot data/nerf/$NAME/base.ingp --width 500 --height 500 --screenshot_spp=4 --xxx_b=0:600:100 --xxx_a=0:3600:300 --xxx_scale=2.0 --xxx=${NAME}_test --n_steps 0 --gui
+...
+
+--------------------
+NAME=starprinter2b && DISPLAY=:20 ./.venv/bin/python3 ./scripts/run.py --scene data/nerf/$NAME/ --load_snapshot data/nerf/$NAME/base.ingp --width 500 --height 500 --screenshot_spp=8 --xxx_b=0:600:30 --xxx_a=0:3600:20 --xxx_scale=2.0 --xxx=${NAME}_preview --n_steps 0 --gui
+cd ./starprinter2b_preview_s200_b30_a20_spp8
+ls -1 *.jpg | sort | xargs -I{} echo "file {}" > list.txt
+ffmpeg -r 100 -f concat -safe 0 -i list.txt -c:v libx264 -profile:v high422 -tune fastdecode -movflags faststart -x264-params keyint=5:min-keyint=5:scenecut=0 -pix_fmt yuv420p starprinter2b_preview_s200_b30_a20_spp8.mp4
+gsutil cp starprinter2b_preview_s200_b30_a20_spp8.mp4 gs://bestat-test-public/demo-data/
+
+--------------------
+NAME=starprinter2b && DISPLAY=:20 ./.venv/bin/python3 ./scripts/run.py --scene data/nerf/$NAME/ --load_snapshot data/nerf/$NAME/base.ingp --width 1000 --height 1000 --screenshot_spp=16 --xxx_b=0:600:30 --xxx_a=0:3600:20 --xxx_scale=3.0 --xxx=${NAME} --n_steps 0 --gui
+...
+
