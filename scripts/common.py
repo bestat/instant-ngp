@@ -9,7 +9,9 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import code
+from collections.abc import Mapping
 import glob
+from typing import Any
 import imageio
 import numpy as np
 import os
@@ -45,6 +47,33 @@ def repl(testbed):
 	print("-------------------\npress Ctrl-Z to return to gui\n---------------------------")
 	code.InteractiveConsole(locals=locals()).interact()
 	print("------- returning to gui...")
+
+
+class Console(code.InteractiveConsole):
+	def __init__(self, func, locals: Mapping[str, Any] | None = None, filename: str = "<console>") -> None:
+		self._func = func
+		self._exit = False
+		super().__init__(locals, filename)
+
+	def raw_input(self, prompt=""):
+		if self._exit:
+			raise EOFError()
+		return super().raw_input(prompt)
+
+	def push(self, line):
+		if line=="exit":
+			self._exit = True
+			return False
+		more = super().push(line)
+		if more == False:
+			self._func()
+
+def repl2(testbed, func):
+	print("-------------------\ntype 'exit' to return to gui\n---------------------------")
+	console = Console(func, locals={"testbed": testbed})
+	console.interact()
+	print("------- returning to gui...")
+
 
 def mse2psnr(x): return -10.*np.log(x)/np.log(10.)
 

@@ -23,6 +23,13 @@ from scenes import *
 from tqdm import tqdm
 
 import pyngp as ngp # noqa
+import math
+
+# need to import before "ngp.Testbed()"
+import rlcompleter
+import readline
+readline.parse_and_bind("tab: complete")
+
 
 def parse_args():
 	parser = argparse.ArgumentParser(description="Run instant neural graphics primitives with additional configuration & output options")
@@ -66,7 +73,10 @@ def parse_args():
 	parser.add_argument("--vr", action="store_true", help="Render to a VR headset.")
 
 	parser.add_argument("--sharpen", default=0, help="Set amount of sharpening applied to NeRF training images. Range 0.0 to 1.0.")
-
+	parser.add_argument("--xxx", default="", help="xxx")
+	parser.add_argument("--xxx_a", type=str, default="0:3600:30", help="a min:max:step")
+	parser.add_argument("--xxx_b", type=str, default="0:900:30", help="b min:max:step")
+	parser.add_argument("--xxx_scale", type=float, default=1.5)
 
 	return parser.parse_args()
 
@@ -180,8 +190,17 @@ if __name__ == "__main__":
 	if n_steps > 0:
 		with tqdm(desc="Training", total=n_steps, unit="step") as t:
 			while testbed.frame():
-				if testbed.want_repl():
-					repl(testbed)
+				_enable_repl2 = True
+				if _enable_repl2:
+					if testbed.want_repl():
+						def framex():
+							for i in range(3):
+								testbed.frame()
+						repl2(testbed, framex)
+				else:
+					if testbed.want_repl():
+						repl(testbed)
+
 				# What will happen when training is done?
 				if testbed.training_step >= n_steps:
 					if args.gui:
@@ -314,3 +333,100 @@ if __name__ == "__main__":
 
 		os.system(f"ffmpeg -y -framerate {args.video_fps} -i tmp/%04d.jpg -c:v libx264 -pix_fmt yuv420p {args.video_output}")
 		shutil.rmtree("tmp")
+
+	if args.xxx:
+		print(f"testbed.up_dir={testbed.up_dir}")
+
+		print(f"testbed.dlss={testbed.dlss}")
+		print(f"testbed.dlss_sharpening={testbed.dlss_sharpening}")
+		print(f"testbed.autofocus={testbed.autofocus}")
+		testbed.dlss = True
+		testbed.dlss_sharpening = 1.0
+		testbed.autofocus = True
+		print(f"testbed.dlss={testbed.dlss}")
+		print(f"testbed.dlss_sharpening={testbed.dlss_sharpening}")
+		print(f"testbed.autofocus={testbed.autofocus}")
+
+		resolution = [args.width or 1920, args.height or 1080]
+		#print(f"xxx={args.xxx} xxx_delta_a={args.xxx_delta_a} xxx_delta_b={args.xxx_delta_b} xxx_scale={args.xxx_scale}")
+		print(f"xxx={args.xxx} xxx_a={args.xxx_a} xxx_b={args.xxx_b} xxx_scale={args.xxx_scale}")
+		a_min, a_max, a_step = [int(n) for n in args.xxx_a.split(":")]
+		b_min, b_max, b_step = [int(n) for n in args.xxx_b.split(":")]
+		dir_name = f"{args.xxx}_s{int(args.xxx_scale*100):03d}_b{b_step:02d}_a{a_step:02d}_spp{args.screenshot_spp:1d}"
+		params = {
+			"a": {"min": a_min, "max": a_max, "step": a_step},
+			"b": {"min": b_min, "max": b_max, "step": b_step},
+			"image": {"size": {"w": resolution[0], "h": resolution[1]}},
+			"scale": args.xxx_scale,
+			"spp": args.screenshot_spp
+		}
+
+		os.makedirs(dir_name, exist_ok=True)
+		abs = []
+		for b in range(b_min,b_max,b_step): # 0-900
+			for a in range(a_min,a_max,a_step): # 0-3600
+				abs.append((a,b))
+
+		# print(f"np.array({np.array2string(testbed.crop_box(), separator=',', suppress_small=True)})")
+		testbed.set_crop_box(np.array([[-0.9217814 ,-1.1399978 ,-1.2270919 , 0.00000144],
+          [-0.4972273 , 1.523758  ,-1.042094  , 0.00000686],
+          [ 1.59941   ,-0.18330199,-1.0311725 , 0.00000253]]))
+		testbed.background_color = [1,1,1,1]
+
+		from numpy import linalg
+		from scipy.spatial.transform import Rotation
+
+		# aの回転軸 : 真上から下を見ている方向のview_dir * -1
+		testbed.up_dir = [-0.8116045, 0.08000506, 0.57870126]
+		rot_a = Rotation.from_rotvec(testbed.up_dir * math.pi/180)
+
+		# 正面の方向view_dir0 : 回転軸と直交するベクトル(反対向きになって何も見えないときは*-1する)
+		cross_v = np.cross(testbed.up_dir, [1,0,0])
+		cross_v = cross_v / np.linalg.norm(cross_v)
+		view_dir0 = cross_v
+
+		# bの回転用 : up_dirとview_dir0に直交する軸
+		cross_b = np.cross(testbed.up_dir, view_dir0)
+		cross_b = cross_b / np.linalg.norm(cross_b)
+		rot_b = Rotation.from_rotvec(cross_b * math.pi/180)
+
+		for a,b in tqdm(abs,ascii=True):
+			outname = os.path.join(dir_name, f"img_b{b:04d}_a{a:04d}.jpg")
+			if os.path.exists(outname):
+				continue
+			testbed.scale = args.xxx_scale
+			_a = a - 180
+
+			# testbed.view_dir = [
+			# 	math.sin(_a/10.0*math.pi/180) * math.cos(b/10.0*math.pi/180),
+			# 	-1.0                          * math.sin(b/10.0*math.pi/180),
+			# 	math.cos(_a/10.0*math.pi/180) * math.cos(b/10.0*math.pi/180)
+			# ]
+
+			testbed.view_dir = view_dir0
+
+			# bの回転 : cross_bを軸にview_dirを回転
+			testbed.view_dir = Rotation.from_rotvec(rot_b.as_rotvec()*b/10.0).apply(testbed.view_dir)
+
+			# aの回転 : up_dirを軸にview_dirを回転
+			testbed.view_dir = Rotation.from_rotvec(rot_a.as_rotvec()*_a/10.0).apply(testbed.view_dir)
+
+			#print(f"a={a}; b={b}; testbed.view_dir={testbed.view_dir}; testbed.up_dir={testbed.up_dir}")
+			testbed.look_at = [0.5,0.5,0.5]
+
+			# view_dir_size = math.sqrt(testbed.view_dir[0]**2+testbed.view_dir[1]**2+testbed.view_dir[2]**2)
+			# print(f"a={a} b={b} view_dir={testbed.view_dir} view_dir_size={view_dir_size}")
+
+			#print(f"rendering {outname}")
+			frame = testbed.render(resolution[0], resolution[1], args.screenshot_spp, True)
+			quality = 95
+			write_image(outname, np.clip(frame * 2**args.exposure, 0.0, 1.0), quality=quality)
+
+		with open(os.path.join(dir_name, "params.json"), "w") as f:
+			f.write(json.dumps(params,indent=2))
+
+		#os.system(f"ffmpeg -y -framerate {args.video_fps} -i tmp/%04d.jpg -c:v libx264 -pix_fmt yuv420p {args.video_output}")
+		#shutil.rmtree("tmp")
+
+		# % printf "file '%s'\n" out01/*.jpg | sort > mylist.txt
+		# % ffmpeg -f concat -i mylist.txt out01b.mp4
